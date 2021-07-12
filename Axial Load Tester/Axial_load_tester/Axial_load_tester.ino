@@ -1,4 +1,4 @@
-// include the library code:
+// include the library code:        //importing necessary libraries
 #include <LiquidCrystal.h>
 #include <Arduino.h>
 #include <RotaryEncoder.h>
@@ -11,7 +11,7 @@
 
 
 File testfile;
-String fileName = "test.csv";
+String fileName = "test.csv";       // Name of csv file
 
 /*==================== EEPROM ==========================*/
 int F_Min_Addr = 4;
@@ -29,16 +29,24 @@ int readIntFromEEPROM(int address)
 /*======================================================*/
 
 
-void print_measure();
+void print_measure();         // Function Prototyping
 void print_setting();
+void SD_Results_Fail();
+void SD_Results_Pass();
+void print_modbus();
+void States_Menu();
 
-const int rs = 8, en = 9, d4 = 4, d5 = 5, d6 = 6, d7 = 7;
+
+const int rs = 8, en = 9, d4 = 4, d5 = 5, d6 = 6, d7 = 7;        //LCD Pin declaration 
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
-#define PIN_IN1 A3
+#define PIN_IN1 A3          // pin declaration of Rotary Encoder
 #define PIN_IN2 A4
 #define PUSHB A5
-/*============MODBUS==================*/
+RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::TWO03);
+
+
+/*============MODBUS Declaration ==================*/
 #define MAX485_DE      3
 #define MAX485_RE_NEG  2
 #define Pass_LED A1
@@ -49,14 +57,13 @@ float temp = 0;
 float Force = 0;
 /*===================================*/
 
-RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::TWO03);
 
 static int pos = 0;
 static int newPos = 0;
 int State = 0;
-volatile int F_Min = readIntFromEEPROM(F_Min_Addr);
+volatile int F_Min = readIntFromEEPROM(F_Min_Addr); // Reading from EEPROM at F_Min_Addr location
 
-/*==================MODBUS===================*/
+/*==================MODBUS Init ===================*/
 // instantiate ModbusMaster object
 ModbusMaster node;
 void preTransmission()
@@ -78,12 +85,13 @@ void setup()
   Serial.begin(19200);
   while (! Serial);
 
+  /*=============== SD Card Init =====================*/
   // wait for SD module to start
   if (!SD.begin(10)) {
     Serial.println("No SD Module Detected");
-    while (1);
   }
-  delay(10);
+  delay(1000);
+  /*============================================*/
 
   pinMode(PUSHB, INPUT); //Encoder button
 
@@ -117,12 +125,15 @@ void setup()
   /*======================================*/
 
 
-  /*=============== LCD ============================*/
+  /*=============== LCD Init  ====================*/
   lcd.begin(16, 2);
   lcd.clear();
   lcd.print("LOAD CELL");
   delay(1000);
-  if (digitalRead(PUSHB) == LOW )
+  /*===============================================*/
+
+  /*================ Setting Mode Check ===========*/
+  if (digitalRead(PUSHB) == LOW )     // If Encoder button is pressed
   {
     State = 1;
     Serial.println(" loop State =1");
@@ -135,9 +146,9 @@ void setup()
     State = 0;
     print_measure();
   }
-  /*=====================================*/
+  /*==========================================*/
 
-}//setup
+}//setup end
 
 
 
@@ -146,7 +157,6 @@ void loop()
   if (State == 0)
   {
     print_modbus();
-
   }
 
   if (State == 1) {
@@ -157,19 +167,20 @@ void loop()
       States_Menu();
     }
   }
-}
+} // loop end
 
 
 
 void States_Menu()
 {
   delay(100);
-  print_setting();
+
 
   if (pos >= 0)
   {
     Serial.println(pos);
     F_Min = pos;
+    print_setting();
 
     if (digitalRead(PUSHB) == LOW )
     {
@@ -187,7 +198,7 @@ void States_Menu()
     encoder.setPosition(0);
   }
 
-}
+} // States_Menu end
 
 void print_modbus()
 {
@@ -195,24 +206,29 @@ void print_modbus()
   if (cellStatus == 0)
   {
 
-    // Read 16 registers starting at 0x3100)
+    // Read 16 registers starting at 0x07)
     result = node.readHoldingRegisters(0x07, 2);
-    Force = float(node.getResponseBuffer(0x00)) / 10; // 12 =>1.2
-    if (result == node.ku8MBSuccess)
+    Force = float(node.getResponseBuffer(0x00)) / 10;  //Like  12 =>1.2
+    if (result == node.ku8MBSuccess)    // If proper data is received
     {
       print_measure();
       Serial.print("Fmax: ");
       Serial.println(Force);
-      if (Force >= F_Min) // in gm
+
+
+
+
+      if (Force >= temp)  //If the new incoming Force value is greater than the previous one
       {
-        if (Force >= temp)
-        {
-          temp = Force;
-          Serial.println("Reading");
-          digitalWrite(Pass_LED, HIGH);
-          digitalWrite(Fail_LED, HIGH);
-        }
-        else if (Force < temp)
+        temp = Force;
+        Serial.println("Reading");
+        digitalWrite(Pass_LED, HIGH);
+        digitalWrite(Fail_LED, HIGH);
+      }
+      else if (Force < temp)   // If the new incoming Force value is less than the previous one
+      {
+
+        if (temp >= F_Min) // If Previous force value is greater than the Minimum force limit
         {
           Serial.println(" ");
           Serial.println("PASS");
@@ -230,22 +246,12 @@ void print_modbus()
           cellStatus = 1;
           digitalWrite(Pass_LED, HIGH);
           digitalWrite(Fail_LED, LOW);
+          
           SD_Results_Pass();
-
-
         }
-      }
 
-      else        // when Force < F_Min
-      {
-        if (Force >= temp)
-        {
-          temp = Force;
-          Serial.println("Reading");
-          digitalWrite(Pass_LED, HIGH);
-          digitalWrite(Fail_LED, HIGH);
-        }
-        else if (Force < temp)
+        else if (temp < F_Min)        // If Previous force value is less  than the Minimum force limit
+
         {
           Serial.println(" ");
           Serial.println("Fail");
@@ -261,17 +267,17 @@ void print_modbus()
           lcd.setCursor(13, 1);
           lcd.print("Kg");
           cellStatus = 1;
-          digitalWrite(Pass_LED, HIGH);
-          digitalWrite(Fail_LED, LOW);
+          digitalWrite(Pass_LED, LOW);
+          digitalWrite(Fail_LED, HIGH);
 
-          SD_Results_Fail();
-
-
+          SD_Results_Fail();     //Store the results to SD Card
         }
+
       }
+
     }
 
-    if (result == node.ku8MBResponseTimedOut)
+    if (result == node.ku8MBResponseTimedOut) //If Communication Breaks between Weight Transmitter and System(Arduino)
     {
       digitalWrite(Pass_LED, HIGH);
       digitalWrite(Fail_LED, HIGH);
@@ -286,7 +292,6 @@ void print_modbus()
 
 void print_measure()
 {
-  Serial.println("Print_Menu");
   lcd.clear();
   lcd.setCursor(1, 0);     //(col, row)
   lcd.print("Measuring Mode:");
@@ -300,7 +305,6 @@ void print_measure()
 
 void print_setting()
 {
-  Serial.println("State 1");
   lcd.clear();
   lcd.setCursor(1, 0);
   lcd.print("Setting Mode");
@@ -312,6 +316,7 @@ void print_setting()
   lcd.print("Kg");
 }
 
+/*============== Saving to SD Card ==================*/
 void SD_Results_Pass()
 {
   SD.begin(10);
@@ -341,3 +346,4 @@ void SD_Results_Fail()
     Serial.println("error opening file");
   }
 }
+/*=====================================================*/
